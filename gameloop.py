@@ -1,8 +1,10 @@
 import pygame
 import math
+import random
 
 pygame.init()
-# player / map info
+
+# Player and map info
 player_pos = [128, 128]
 player_angle = 0
 player_pitch = 0
@@ -15,20 +17,23 @@ game_map = [
     "W        W",
     "WWWWWWWWWW",
 ]
-# screen information, impacts peformance.
+
+# Screen information
 WIDTH = 1280
 HEIGHT = 720
 window = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("2.5D Aim Trainer")
-# settings that greatly impact performance
+
+# Performance settings
 FOV = math.pi / 2
 VERTICAL_FOV = math.pi / 3
-NUM_RAYS = int(int(WIDTH) / 8)
+NUM_RAYS = int(WIDTH / 8)
 MAX_DEPTH = 800
 DELTA_ANGLE = FOV / NUM_RAYS
 SCREEN_DIST = (WIDTH // 2) / math.tan(FOV / 2)
 SCALE = WIDTH // NUM_RAYS
-# texture loading
+
+# Texture loading
 wall_texture = pygame.image.load("wall_texture.png").convert()
 wall_texture = pygame.transform.scale(wall_texture, (64, 64))
 ceiling_texture = pygame.image.load("ceiling_texture.png").convert()
@@ -45,8 +50,14 @@ class Target:
         self.image = pygame.image.load("target.png").convert_alpha()
         self.distance = 0
 
+    def respawn(self):
+        # Set a new random position for the target
+        self.pos_x = random.randint(1, len(game_map[0]) - 2) * 64
+        self.pos_y = random.randint(1, len(game_map) - 2) * 64
+        self.pos_z = random.randint(-15, 15)
+
     def update(self, player_pos, player_z, player_angle, player_pitch):
-        # Distance between the target and player on each axis
+        # Update position and rendering properties
         dx = self.pos_x - player_pos[0]
         dy = self.pos_y - player_pos[1]
         dz = self.pos_z - player_z
@@ -61,6 +72,7 @@ class Target:
         # Required change in horizontal angle to reach the target
         angle_difference = self.theta - player_angle
 
+        # Normalize angle.
         def normalize_angle(angle):
             while angle > math.pi:
                 angle -= 2 * math.pi
@@ -68,7 +80,6 @@ class Target:
                 angle += 2 * math.pi
             return angle
 
-        # Normalize angle.
         self.delta_theta = normalize_angle(angle_difference)
         # Required change in vertical angle to reach the target.
         self.delta_phi = player_pitch - self.phi
@@ -110,7 +121,6 @@ class Target:
 
 def rayCasting(player_pos, player_angle, pitch):
     player_x, player_y = player_pos
-
     current_angle = player_angle - (FOV / 2)
 
     # ray loop
@@ -128,16 +138,18 @@ def rayCasting(player_pos, player_angle, pitch):
             map_col = int(ray_x) // 64
             map_row = int(ray_y) // 64
             # is the ray in the map?
-            if 0 <= map_row < len(game_map) and 0 <= map_col < len(game_map[0]):
-                # HAS BEEN HIT WALL
+            if 0 <= map_row < len(game_map) and 0 <= map_col < len(
+                game_map[0]
+            ):  # HAS BEEN HIT WALL
                 if game_map[map_row][map_col] == "W":
                     break
             else:
                 break
+
         # render walls
         if depth < MAX_DEPTH:
             corrected_depth = depth * math.cos(player_angle - current_angle)
-            wall_height = (SCREEN_DIST / (corrected_depth)) * 64
+            wall_height = (SCREEN_DIST / corrected_depth) * 64
             # slice the wall texture
             wall_texture_column = wall_texture.subsurface(0, 0, 64, 64)
             # scale the wall texture column to the projected wall height
@@ -149,7 +161,7 @@ def rayCasting(player_pos, player_angle, pitch):
             screen_y = (HEIGHT // 2 - wall_height // 2) + vertical_offset
             # draw the wall
             window.blit(wall_texture_column, (ray * SCALE, screen_y))
-        # increment angle for next ray
+            # increment angle for next ray
         current_angle += DELTA_ANGLE
 
 
@@ -159,13 +171,36 @@ def disableMouse():
     pygame.mouse.get_rel()
 
 
+# ADDED CROSSHAIR
+def draw_crosshair():
+    crosshair_size = 20
+    color = (0, 0, 0)
+    thickness = 2
+    pygame.draw.line(
+        window,
+        color,
+        (WIDTH // 2 - crosshair_size, HEIGHT // 2),
+        (WIDTH // 2 + crosshair_size, HEIGHT // 2),
+        thickness,
+    )
+    pygame.draw.line(
+        window,
+        color,
+        (WIDTH // 2, HEIGHT // 2 - crosshair_size),
+        (WIDTH // 2, HEIGHT // 2 + crosshair_size),
+        thickness,
+    )
+
+
 def gameLoop():
     global player_angle, player_pitch
     clock = pygame.time.Clock()
     gameloop = True
 
+    # Hide the mouse and set the initial score
     disableMouse()
-
+    score = 0
+    font = pygame.font.Font(None, 36)  # Font for displaying the score
     targets = [
         Target(2, 2, 0),
         Target(7, 2, 0),
@@ -191,23 +226,28 @@ def gameLoop():
         player_angle += mouse_rel[0] / 1000
         player_pitch -= mouse_rel[1] / 1000
 
+        # score and respawning
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 gameloop = False
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for target in targets:
                     if target.isClicked():
-                        targets.remove(target)
+                        target.respawn()  # Respawn target on hit
+                        score += 1  # Increment score
                         break
 
         rayCasting(player_pos, player_angle, player_pitch)
-
         for target in targets:
             target.update(player_pos, player_z, player_angle, player_pitch)
         targets.sort(key=lambda target: target.distance, reverse=True)
-
         for target in targets:
             target.drawTarget()
+
+        draw_crosshair()
+
+        score_text = font.render(f"Score: {score}", True, (0, 0, 0))
+        window.blit(score_text, (10, 10))
 
         pygame.display.update()
         clock.tick(240)
