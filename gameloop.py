@@ -1,10 +1,11 @@
 import pygame
 import math
 import random
+import sys
 
 pygame.init()
 
-
+pygame.font.init()
 pygame.mixer.init()
 sound_effect = pygame.mixer.Sound("hitmarker.mp3")
 
@@ -218,7 +219,6 @@ def handlePlayerMovement(keyboard):
     player_pos[0] = new_x
     player_pos[1] = new_y
 
-
 def gameLoop():
     global player_angle, player_pitch
     clock = pygame.time.Clock()
@@ -276,13 +276,58 @@ def gameLoop():
 
         draw_crosshair()
 
-        score_text = font.render(f"Score: {score}", True, (0, 0, 0))
-        window.blit(score_text, (10, 10))
-
+        score_text = font.render(f"Score: {score}", True, (10, 10, 10))
+        # fixed the scoring display
+        window.blit(score_text, (225, 50))
         pygame.display.update()
         clock.tick(240)
 
     pygame.quit()
 
+class Game:
+    def __init__(self):
+        self.window = window
+        self.font = pygame.font.Font(None, 74)
+        self.state = "main_menu"
+        self.selected_item = 0
+        self.menu_items = ["Start Game", "Leaderboard", "Settings"]
 
-gameLoop()
+    def draw_menu(self):
+        self.window.fill((255, 255, 255))
+        title_text = self.font.render("Main Menu", True, (128, 0, 128))
+        self.window.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 4))
+        for i, item in enumerate(self.menu_items):
+            color = (128, 0, 128) if i == self.selected_item else (0, 0, 0)
+            menu_text = self.font.render(item, True, color)
+            self.window.blit(menu_text, (WIDTH // 2 - menu_text.get_width() // 2, HEIGHT // 2 + i * 100))
+        pygame.display.update()
+
+    def main_menu(self):
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_DOWN:
+                        self.selected_item = (self.selected_item + 1) % len(self.menu_items)
+                    elif event.key == pygame.K_UP:
+                        self.selected_item = (self.selected_item - 1) % len(self.menu_items)
+                    elif event.key == pygame.K_RETURN:
+                        if self.selected_item == 0:
+                            gameLoop()  # Call the game loop when Start Game is selected
+                        elif self.selected_item == 1:
+                            self.state = "leaderboard"
+                        elif self.selected_item == 2:
+                            self.state = "settings"
+            self.draw_menu()
+
+    def run(self):
+        while True:
+            if self.state == "main_menu":
+                self.main_menu()
+
+if __name__ == "__main__":
+    game = Game()
+    game.run()
