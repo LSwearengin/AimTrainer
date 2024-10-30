@@ -195,7 +195,7 @@ def disableMouse():
 
 
 # ADDED CROSSHAIR
-def draw_crosshair():
+def draw_crosshair(window):
     crosshair_size = 20
     color = (0, 0, 0)
     thickness = 2
