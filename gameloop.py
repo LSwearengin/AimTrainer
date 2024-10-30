@@ -1,13 +1,12 @@
 import pygame
 import math
 import random
+import sys
 
 pygame.init()
-
-
+pygame.font.init()
 pygame.mixer.init()
 sound_effect = pygame.mixer.Sound("hitmarker.mp3")
-
 
 # Player and map info
 player_pos = [128, 128]
@@ -27,8 +26,6 @@ game_map = [
 # Screen information
 WIDTH = 1920
 HEIGHT = 1080
-window = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("2.5D Aim Trainer")
 
 # Performance settings
 FOV = math.pi / 2
@@ -39,31 +36,52 @@ DELTA_ANGLE = FOV / NUM_RAYS
 SCREEN_DIST = (WIDTH // 2) / math.tan(FOV / 2)
 SCALE = WIDTH // NUM_RAYS
 
-# Texture loading
-wall_texture = pygame.image.load("wall_texture.png").convert()
-wall_texture = pygame.transform.scale(wall_texture, (64, 64))
-ceiling_texture = pygame.image.load("ceiling_texture.png").convert()
-ceiling_texture = pygame.transform.scale(ceiling_texture, (WIDTH, HEIGHT))
-
-
 # Target class
 class Target:
-    def __init__(self, pos_x, pos_y, pos_z):
+    def __init__(self, pos_x, pos_y, pos_z, image, moving=False):
         self.pos_x = pos_x * 64
         self.pos_y = pos_y * 64
         self.pos_z = pos_z
         self.size = 0.5
-        self.image = pygame.image.load("target.png").convert_alpha()
+        self.image = image
         self.distance = 0
+        self.moving = moving
+        self.move_dx = random.choice([-1, 1]) * random.uniform(0.5, 1.5)
+        self.move_dy = random.choice([-1, 1]) * random.uniform(0.5, 1.5)
 
-    def respawn(self):
-        # Set a new random position for the target
-        self.pos_x = random.randint(1, len(game_map[0]) - 2) * 64
-        self.pos_y = random.randint(1, len(game_map) - 2) * 64
+    def respawn(self, targets):
+        #prevent x,y positions from colliding
+        max_x = len(game_map[0]) - 2
+        max_y = len(game_map) - 2
+        occupied_positions = set(
+            (t.pos_x // 64, t.pos_y // 64) for t in targets if t != self
+        )
+        while True:
+            pos_x = random.randint(1, max_x)
+            pos_y = random.randint(1, max_y)
+            if (pos_x, pos_y) not in occupied_positions:
+                break
+        self.pos_x = pos_x * 64
+        self.pos_y = pos_y * 64
         self.pos_z = random.randint(-15, 15)
+        #movement direction change
+        self.move_dx = random.choice([-1, 1]) * random.uniform(0.5, 1.5)
+        self.move_dy = random.choice([-1, 1]) * random.uniform(0.5, 1.5)
 
     def update(self, player_pos, player_z, player_angle, player_pitch):
-        # Update position and rendering properties
+        # position update if moving.
+        if self.moving:
+            self.pos_x += self.move_dx
+            self.pos_y += self.move_dy
+            map_col = int(self.pos_x) // 64
+            map_row = int(self.pos_y) // 64
+            if self.pos_x < 64 or self.pos_x > (len(game_map[0]) - 1) * 64 or game_map[map_row][map_col] == "W":
+                self.move_dx *= -1
+                self.pos_x += self.move_dx * 2  # Move back into bounds
+            if self.pos_y < 64 or self.pos_y > (len(game_map) - 1) * 64 or game_map[map_row][map_col] == "W":
+                self.move_dy *= -1
+                self.pos_y += self.move_dy * 2  # Move back into bounds
+
         dx = self.pos_x - player_pos[0]
         dy = self.pos_y - player_pos[1]
         dz = self.pos_z - player_z
@@ -98,7 +116,7 @@ class Target:
             (HEIGHT // 2) + (self.delta_phi * SCREEN_DIST) - (self.proj_height / 2)
         )
 
-    def drawTarget(self):
+    def drawTarget(self, window):
         is_in_front_of_player = self.distance > 0
         half_horizontal_fov = math.pi / 2
         is_within_horizontal_fov = (
@@ -114,16 +132,17 @@ class Target:
 
     def isClicked(self):
         target_radius = self.proj_height / 2
-        dx = abs(self.screen_x - WIDTH // 2)
-        dy = abs(self.screen_y - HEIGHT // 2)
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        target_center_y = self.screen_y + self.proj_height / 2
+        dx = abs(self.screen_x - mouse_x)
+        dy = abs(target_center_y - mouse_y)
         # is it in the radius of the target???
         is_within_crosshair = dx < target_radius and dy < target_radius
-        if is_within_crosshair:
-            return True
-        return False
+        # had the dumbest if statement before, changed...
+        return is_within_crosshair
 
 
-def rayCasting(player_pos, player_angle, pitch):
+def rayCasting(player_pos, player_angle, pitch, window, wall_texture):
     player_x, player_y = player_pos
     current_angle = player_angle - (FOV / 2)
 
@@ -197,6 +216,7 @@ def draw_crosshair():
 
 
 def handlePlayerMovement(keyboard):
+    global player_pos
     new_x = player_pos[0]
     new_y = player_pos[1]
 
@@ -219,26 +239,39 @@ def handlePlayerMovement(keyboard):
     player_pos[1] = new_y
 
 
-def gameLoop():
-    global player_angle, player_pitch
+def gameLoop(task):
+    global player_angle, player_pitch, player_pos
     clock = pygame.time.Clock()
     gameloop = True
+
+    window = pygame.display.get_surface()
+
+    # load textures in local. Potential optimization on target_image
+    wall_texture = pygame.image.load("wall_texture.png").convert()
+    wall_texture = pygame.transform.scale(wall_texture, (64, 64))
+    ceiling_texture = pygame.image.load("ceiling_texture.png").convert()
+    ceiling_texture = pygame.transform.scale(ceiling_texture, (WIDTH, HEIGHT))
+    target_image = pygame.image.load("target.png").convert_alpha()
 
     # Hide the mouse and set the initial score
     disableMouse()
     score = 0
-    font = pygame.font.Font(None, 36)  # Font for displaying the score
+    font = pygame.font.Font(None, 36) # Font for displaying the score
+
+    # Determine if targets should move based on task
+    moving_targets = task.get('moving_targets', False)
+
     targets = [
-        Target(2, 2, 0),
-        Target(7, 2, 0),
-        Target(2, 3, 10),
-        Target(7, 3, -10),
-        Target(4, 2, 5),
-        Target(4, 3, -5),
-        Target(3, 4, 0),
-        Target(6, 4, 0),
-        Target(5, 2, 15),
-        Target(5, 4, -15),
+        Target(2, 2, 0, target_image, moving=moving_targets),
+        Target(7, 2, 0, target_image, moving=moving_targets),
+        Target(2, 3, 10, target_image, moving=moving_targets),
+        Target(7, 3, -10, target_image, moving=moving_targets),
+        Target(4, 2, 5, target_image, moving=moving_targets),
+        Target(4, 3, -5, target_image, moving=moving_targets),
+        Target(3, 4, 0, target_image, moving=moving_targets),
+        Target(6, 4, 0, target_image, moving=moving_targets),
+        Target(5, 2, 15, target_image, moving=moving_targets),
+        Target(5, 4, -15, target_image, moving=moving_targets),
     ]
 
     while gameloop:
@@ -254,35 +287,33 @@ def gameLoop():
         player_pitch -= mouse_rel[1] / 1000
 
         handlePlayerMovement(pygame.key.get_pressed())
-
         # score and respawning
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 gameloop = False
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
+                targets.sort(key=lambda target: target.distance)
                 for target in targets:
                     if target.isClicked():
                         sound_effect.play()
-                        target.respawn()  # Respawn target on hit
-                        score += 1  # Increment score
+                        target.respawn(targets)
+                        score += 1
                         break
 
-        rayCasting(player_pos, player_angle, player_pitch)
+        rayCasting(player_pos, player_angle, player_pitch, window, wall_texture)
         for target in targets:
             target.update(player_pos, player_z, player_angle, player_pitch)
         targets.sort(key=lambda target: target.distance, reverse=True)
         for target in targets:
-            target.drawTarget()
+            target.drawTarget(window)
 
-        draw_crosshair()
+        draw_crosshair(window)
 
-        score_text = font.render(f"Score: {score}", True, (0, 0, 0))
-        window.blit(score_text, (10, 10))
-
+        score_text = font.render(f"Score: {score}", True, (10, 10, 10))
+        # fixed the scoring display
+        window.blit(score_text, (225, 50))
         pygame.display.update()
         clock.tick(240)
 
     pygame.quit()
-
-
-gameLoop()
